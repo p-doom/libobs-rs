@@ -426,26 +426,44 @@ impl SimpleOutputBuilder {
     }
 
     fn hardware_candidates(&self, codec: HardwareCodec) -> Vec<ObsVideoEncoderType> {
+        use libobs_wrapper::encoders::{VIDEOTOOLBOX_H264, VIDEOTOOLBOX_HEVC};
+        
         match codec {
             HardwareCodec::H264 => vec![
+                // macOS VideoToolbox (preferred on Mac)
+                ObsVideoEncoderType::Other(VIDEOTOOLBOX_H264.to_string()),
+                // NVIDIA
                 ObsVideoEncoderType::OBS_NVENC_H264_TEX,
+                // AMD
                 ObsVideoEncoderType::H264_TEXTURE_AMF,
+                // Intel QuickSync
                 ObsVideoEncoderType::OBS_QSV11_V2,
                 // software fallbacks for vendor SDKs
                 ObsVideoEncoderType::OBS_NVENC_H264_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_SOFT_V2,
             ],
             HardwareCodec::HEVC => vec![
+                // macOS VideoToolbox HEVC (preferred on Mac, requires macOS 10.13+)
+                ObsVideoEncoderType::Other(VIDEOTOOLBOX_HEVC.to_string()),
+                // NVIDIA
                 ObsVideoEncoderType::OBS_NVENC_HEVC_TEX,
+                // AMD
                 ObsVideoEncoderType::H265_TEXTURE_AMF,
+                // Intel QuickSync
                 ObsVideoEncoderType::OBS_QSV11_HEVC,
+                // software fallbacks
                 ObsVideoEncoderType::OBS_NVENC_HEVC_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_HEVC_SOFT,
             ],
             HardwareCodec::AV1 => vec![
+                // Note: macOS VideoToolbox does not support AV1 as of macOS 14
+                // NVIDIA
                 ObsVideoEncoderType::OBS_NVENC_AV1_TEX,
+                // AMD
                 ObsVideoEncoderType::AV1_TEXTURE_AMF,
+                // Intel QuickSync
                 ObsVideoEncoderType::OBS_QSV11_AV1,
+                // software fallbacks
                 ObsVideoEncoderType::OBS_NVENC_AV1_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_AV1_SOFT,
             ],
