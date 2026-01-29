@@ -358,7 +358,7 @@ impl SimpleOutputBuilder {
 
         log::trace!("Selected video encoder: {:?}", video_encoder_type);
         std::io::stdout().flush().unwrap();
-        self.configure_video_encoder(&mut video_settings)?;
+        self.configure_video_encoder(&mut video_settings, &video_encoder_type)?;
 
         let video_encoder_info = VideoEncoderInfo::new(
             video_encoder_type,
@@ -470,22 +470,41 @@ impl SimpleOutputBuilder {
         }
     }
 
-    fn get_encoder_preset(&self, encoder: &VideoEncoder) -> Option<&str> {
-        match encoder {
-            VideoEncoder::X264(preset) => Some(preset.as_str()),
-            VideoEncoder::Hardware { preset, .. } => Some(preset.as_str()),
-            VideoEncoder::Custom(_) => None,
+    /// Map HardwarePreset to equivalent x264 preset for fallback scenarios
+    fn hardware_preset_to_x264(preset: &HardwarePreset) -> &'static str {
+        match preset {
+            HardwarePreset::Speed => "veryfast",
+            HardwarePreset::Balanced => "medium",
+            HardwarePreset::Quality => "slow",
         }
     }
 
-    fn configure_video_encoder(&self, settings: &mut ObsData) -> Result<(), ObsError> {
+    fn configure_video_encoder(
+        &self,
+        settings: &mut ObsData,
+        selected_encoder: &ObsVideoEncoderType,
+    ) -> Result<(), ObsError> {
         // Set rate control to CBR
         settings.set_string("rate_control", "CBR")?;
         settings.set_int("bitrate", self.settings.video_bitrate as i64)?;
 
-        // Set preset if available
-        if let Some(preset) = self.get_encoder_preset(&self.settings.video_encoder) {
-            settings.set_string("preset", preset)?;
+        // Set preset based on the requested encoder and actual selected encoder
+        let preset = match &self.settings.video_encoder {
+            VideoEncoder::X264(preset) => Some(preset.as_str()),
+            VideoEncoder::Hardware { preset, .. } => {
+                // If we fell back to x264 from hardware, map the preset appropriately
+                if *selected_encoder == ObsVideoEncoderType::OBS_X264 {
+                    Some(Self::hardware_preset_to_x264(preset))
+                } else {
+                    // Hardware encoder selected, use hardware preset
+                    Some(preset.as_str())
+                }
+            }
+            VideoEncoder::Custom(_) => None,
+        };
+
+        if let Some(preset_str) = preset {
+            settings.set_string("preset", preset_str)?;
         }
 
         // Apply custom encoder settings if provided (mainly for x264)

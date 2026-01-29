@@ -101,13 +101,18 @@ encoder_enum!(
     }
 );
 
-// VideoToolbox encoder IDs for macOS (use dots, not underscores)
+// VideoToolbox encoder IDs for macOS
+// These IDs come from Apple's VTCopyVideoEncoderList() and are registered dynamically by OBS.
 // These must be used via ObsVideoEncoderType::Other(...) since the macro
 // uses stringify! which doesn't handle dots in identifiers.
-/// VideoToolbox H.264 hardware encoder ID (macOS)
-pub const VIDEOTOOLBOX_H264: &str = "com.apple.videotoolbox.h264";
-/// VideoToolbox HEVC hardware encoder ID (macOS, requires macOS 10.13+)  
-pub const VIDEOTOOLBOX_HEVC: &str = "com.apple.videotoolbox.hevc";
+//
+// Note: Intel Macs use different IDs (e.g., "com.apple.videotoolbox.videoencoder.h264.gva")
+// These constants are for Apple Silicon Macs.
+
+/// VideoToolbox H.264 hardware encoder ID (macOS Apple Silicon)
+pub const VIDEOTOOLBOX_H264: &str = "com.apple.videotoolbox.videoencoder.ave.avc";
+/// VideoToolbox HEVC hardware encoder ID (macOS Apple Silicon, requires macOS 10.13+)
+pub const VIDEOTOOLBOX_HEVC: &str = "com.apple.videotoolbox.videoencoder.ave.hevc";
 /// VideoToolbox ProRes encoder ID (macOS)
 pub const VIDEOTOOLBOX_PRORES: &str = "com.apple.videotoolbox.prores";
 
