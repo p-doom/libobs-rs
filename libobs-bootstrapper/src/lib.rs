@@ -1,6 +1,9 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 #[cfg(not(target_os = "macos"))]
 use std::process;
@@ -84,7 +87,11 @@ lazy_static! {
 
 pub const UPDATER_SCRIPT: &str = include_str!("./updater.ps1");
 
-fn get_obs_dll_path() -> Result<PathBuf, ObsBootstrapError> {
+fn resolve_install_dir(options: &ObsBootstrapperOptions) -> Result<PathBuf, ObsBootstrapError> {
+    if let Some(dir) = options.get_install_dir() {
+        return Ok(dir.clone());
+    }
+
     #[cfg(not(target_os = "linux"))]
     let executable =
         env::current_exe().map_err(|e| ObsBootstrapError::IoError("Getting current exe", e))?;
@@ -96,16 +103,30 @@ fn get_obs_dll_path() -> Result<PathBuf, ObsBootstrapError> {
         )
     })?;
 
+    #[cfg(not(target_os = "linux"))]
+    {
+        return Ok(parent.to_path_buf());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        unreachable!("libobs-bootstrapper is not supported on Linux.");
+    }
+}
+
+fn get_obs_dll_path(options: &ObsBootstrapperOptions) -> Result<PathBuf, ObsBootstrapError> {
+    let install_dir = resolve_install_dir(options)?;
+
     #[cfg(target_os = "macos")]
     {
         // macOS: Check for libobs.framework
-        Ok(parent.join("libobs.framework/Versions/A/libobs"))
+        Ok(install_dir.join("libobs.framework/Versions/A/libobs"))
     }
 
     #[cfg(target_os = "windows")]
     {
         // Windows: Check for obs.dll
-        Ok(parent.join("obs.dll"))
+        Ok(install_dir.join("obs.dll"))
     }
 
     #[cfg(target_os = "linux")]
@@ -118,21 +139,23 @@ pub(crate) fn bootstrap(
     options: &ObsBootstrapperOptions,
 ) -> Result<Option<impl Stream<Item = BootstrapStatus>>, ObsBootstrapError> {
     let repo = options.repository.to_string();
+    let install_dir = resolve_install_dir(options)?;
 
     log::trace!("Checking for update...");
-    let update = if options.update {
-        ObsBootstrapper::is_update_available()?
+    let should_bootstrap = if options.update {
+        ObsBootstrapper::is_update_available_with_options(options)?
     } else {
-        ObsBootstrapper::is_valid_installation()?
+        !ObsBootstrapper::is_valid_installation_with_options(options)?
     };
 
-    if !update {
+    if !should_bootstrap {
         log::debug!("No update needed.");
         return Ok(None);
     }
 
     #[allow(unused_variables)]
     let options = options.clone();
+    let install_dir = install_dir.clone();
     Ok(Some(stream! {
         log::debug!("Downloading OBS from {}", repo);
         let download_stream = download::download_obs(&repo).await;
@@ -168,7 +191,7 @@ pub(crate) fn bootstrap(
 
         log::debug!("Extracting OBS to {:?}", archive_file);
         let archive_file = archive_file.unwrap();
-        let extract_stream = extract::extract_obs(&archive_file).await;
+        let extract_stream = extract::extract_obs(&archive_file, &install_dir).await;
         if let Err(err) = extract_stream {
             yield BootstrapStatus::Error(err);
             return;
@@ -193,7 +216,7 @@ pub(crate) fn bootstrap(
         #[cfg(target_os = "macos")]
         {
             // On macOS, we can move files immediately since dylibs can be replaced while running
-            let r = move_obs_files_macos().await;
+            let r = move_obs_files_macos(&install_dir).await;
             if let Err(err) = r {
                 yield BootstrapStatus::Error(err);
                 return;
@@ -273,26 +296,21 @@ pub(crate) async fn spawn_updater(
 }
 
 #[cfg(target_os = "macos")]
-async fn move_obs_files_macos() -> Result<(), ObsBootstrapError> {
+async fn move_obs_files_macos(install_dir: &Path) -> Result<(), ObsBootstrapError> {
     use tokio::fs;
 
-    let exe_path =
-        env::current_exe().map_err(|e| ObsBootstrapError::IoError("Getting current exe", e))?;
-    let exe_dir = exe_path.parent().ok_or_else(|| {
-        ObsBootstrapError::IoError(
-            "Getting exe parent directory",
-            std::io::Error::from(std::io::ErrorKind::InvalidInput),
-        )
-    })?;
-
-    let obs_new_dir = exe_dir.join("obs_new");
+    let obs_new_dir = install_dir.join("obs_new");
 
     if !obs_new_dir.exists() {
         log::warn!("obs_new directory not found at {:?}", obs_new_dir);
         return Ok(());
     }
 
-    log::info!("Moving OBS files from {:?} to {:?}", obs_new_dir, exe_dir);
+    log::info!(
+        "Moving OBS files from {:?} to {:?}",
+        obs_new_dir,
+        install_dir
+    );
 
     // Read all entries in obs_new
     let mut entries = fs::read_dir(&obs_new_dir)
@@ -306,7 +324,7 @@ async fn move_obs_files_macos() -> Result<(), ObsBootstrapError> {
     {
         let src_path = entry.path();
         let file_name = entry.file_name();
-        let dest_path = exe_dir.join(&file_name);
+        let dest_path = install_dir.join(&file_name);
 
         // Remove destination if it exists
         if dest_path.exists() {
@@ -365,7 +383,14 @@ impl ObsBootstrapper {
     /// Returns an `Err(ObsBootstrapError)` if there was an error locating the OBS DLL or
     /// reading the installed version information.
     pub fn is_valid_installation() -> Result<bool, ObsBootstrapError> {
-        let installed = version::get_installed_version(&get_obs_dll_path()?)?;
+        ObsBootstrapper::is_valid_installation_with_options(&ObsBootstrapperOptions::default())
+    }
+
+    /// Same as [`ObsBootstrapper::is_valid_installation`], but uses custom options.
+    pub fn is_valid_installation_with_options(
+        options: &ObsBootstrapperOptions,
+    ) -> Result<bool, ObsBootstrapError> {
+        let installed = version::get_installed_version(&get_obs_dll_path(options)?)?;
         Ok(installed.is_some())
     }
 
@@ -386,7 +411,14 @@ impl ObsBootstrapper {
     /// Returns an `Err(ObsBootstrapError)` if there was an error locating the OBS DLL or
     /// determining the currently installed version or update necessity.
     pub fn is_update_available() -> Result<bool, ObsBootstrapError> {
-        let installed = version::get_installed_version(&get_obs_dll_path()?)?;
+        ObsBootstrapper::is_update_available_with_options(&ObsBootstrapperOptions::default())
+    }
+
+    /// Same as [`ObsBootstrapper::is_update_available`], but uses custom options.
+    pub fn is_update_available_with_options(
+        options: &ObsBootstrapperOptions,
+    ) -> Result<bool, ObsBootstrapError> {
+        let installed = version::get_installed_version(&get_obs_dll_path(options)?)?;
         if installed.is_none() {
             return Ok(true);
         }

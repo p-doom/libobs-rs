@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use crate::{ObsBootstrapperOptions, options::GITHUB_REPO};
 
     #[test]
@@ -8,6 +10,7 @@ mod tests {
         assert_eq!(options.get_repository(), GITHUB_REPO);
         assert!(options.update);
         assert!(options.restart_after_update);
+        assert!(options.get_install_dir().is_none());
     }
 
     #[test]
@@ -35,6 +38,15 @@ mod tests {
     }
 
     #[test]
+    fn test_set_install_dir() {
+        let options = ObsBootstrapperOptions::new().set_install_dir("/tmp/obs-runtime");
+        assert_eq!(
+            options.get_install_dir(),
+            Some(&PathBuf::from("/tmp/obs-runtime"))
+        );
+    }
+
+    #[test]
     fn test_chaining() {
         let options = ObsBootstrapperOptions::new()
             .set_repository("test/repo")
@@ -44,6 +56,7 @@ mod tests {
         assert_eq!(options.get_repository(), "test/repo");
         assert!(!options.update);
         assert!(!options.restart_after_update);
+        assert!(options.get_install_dir().is_none());
     }
 
     #[test]
@@ -52,6 +65,7 @@ mod tests {
         assert_eq!(options.get_repository(), GITHUB_REPO);
         assert!(options.update);
         assert!(options.restart_after_update);
+        assert!(options.get_install_dir().is_none());
     }
 
     #[test]

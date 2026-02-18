@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 // Platform-specific default repos
 #[cfg(target_os = "macos")]
 pub const GITHUB_REPO: &str = "obsproject/obs-studio";
@@ -10,6 +12,7 @@ pub struct ObsBootstrapperOptions {
     pub(crate) repository: String,
     pub(crate) update: bool,
     pub(crate) restart_after_update: bool,
+    pub(crate) install_dir: Option<PathBuf>,
 }
 
 impl ObsBootstrapperOptions {
@@ -18,6 +21,7 @@ impl ObsBootstrapperOptions {
             repository: GITHUB_REPO.to_string(),
             update: true,
             restart_after_update: true,
+            install_dir: None,
         }
     }
 
@@ -35,6 +39,18 @@ impl ObsBootstrapperOptions {
     pub fn set_update(mut self, update: bool) -> Self {
         self.update = update;
         self
+    }
+
+    /// Sets a custom install directory for OBS runtime files.
+    ///
+    /// When omitted, the bootstrapper falls back to the executable directory.
+    pub fn set_install_dir<P: Into<PathBuf>>(mut self, install_dir: P) -> Self {
+        self.install_dir = Some(install_dir.into());
+        self
+    }
+
+    pub fn get_install_dir(&self) -> Option<&PathBuf> {
+        self.install_dir.as_ref()
     }
 
     /// Disables the automatic restart of the application after the update is applied.

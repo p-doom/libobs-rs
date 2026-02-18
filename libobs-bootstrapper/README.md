@@ -137,9 +137,17 @@ The `ObsBootstrapperOptions` struct allows you to customize the bootstrapper:
 
 ```rust
 let options = ObsBootstrapperOptions::default()
-    .with_repository("sshcrack/libobs-builds")  // Custom repo
-    .with_update(true)                          // Force update check
-    .with_restart_after_update(true);           // Auto restart
+    .set_repository("sshcrack/libobs-builds")   // Custom repo
+    .set_update(true)                           // Check/download updates
+    .set_install_dir("/tmp/my-obs-runtime");    // Custom install root
+```
+
+To disable automatic OBS updates but still install when missing:
+
+```rust
+let options = ObsBootstrapperOptions::default()
+    .set_install_dir("/Users/me/Library/Application Support/dev.crowd-cast.agent/obs/current")
+    .set_update(false);
 ```
 
 ## Error Handling

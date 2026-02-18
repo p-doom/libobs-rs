@@ -1,5 +1,4 @@
 use std::{
-    env::current_exe,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -18,19 +17,14 @@ pub enum ExtractStatus {
 }
 
 type ExtractStream = Pin<Box<dyn Stream<Item = ExtractStatus> + Send>>;
-pub(crate) async fn extract_obs(archive_file: &Path) -> Result<ExtractStream, ObsBootstrapError> {
+pub(crate) async fn extract_obs(
+    archive_file: &Path,
+    install_dir: &Path,
+) -> Result<ExtractStream, ObsBootstrapError> {
     log::info!("Extracting OBS at {}", archive_file.display());
 
     let path = PathBuf::from(archive_file);
-
-    let destination =
-        current_exe().map_err(|e| ObsBootstrapError::IoError("Getting current exe", e))?;
-    let destination = destination
-        .parent()
-        .ok_or_else(|| {
-            ObsBootstrapError::ExtractError("Should be able to get parent of exe".to_string())
-        })?
-        .join("obs_new");
+    let destination = install_dir.join("obs_new");
 
     // Platform-specific extraction
     #[cfg(target_os = "macos")]
@@ -53,6 +47,13 @@ pub(crate) async fn extract_obs(archive_file: &Path) -> Result<ExtractStream, Ob
         let (tx, mut rx) = tokio::sync::mpsc::channel(5);
 
         let total = sz.archive().files.len() as f32;
+        if dest.exists() {
+            if let Err(err) = std::fs::remove_dir_all(&dest) {
+                yield Err(ObsBootstrapError::IoError("Failed to clear previous destination directory", err));
+                return;
+            }
+        }
+
         if !dest.exists() && let Err(err) = std::fs::create_dir_all(&dest) {
             yield Err(ObsBootstrapError::IoError("Failed to create destination directory", err));
             return;
