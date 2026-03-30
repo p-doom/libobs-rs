@@ -169,12 +169,26 @@ pub struct OutputSettings {
     path: ObsPath,
     format: OutputFormat,
     custom_muxer_settings: Option<String>,
+    /// Quality value for CRF-based encoding (0-100, higher = better quality).
+    /// When set, supported encoders (VideoToolbox, x264) use CRF instead of CBR.
+    /// VideoToolbox: passed directly as "quality" (0-100).
+    /// x264: mapped to CRF scale (100 → CRF 0, 0 → CRF 51).
+    /// Unsupported encoders fall back to CBR with `video_bitrate`.
+    crf: Option<u32>,
 }
 
 impl OutputSettings {
     /// Sets the video bitrate in Kbps.
     pub fn with_video_bitrate(mut self, bitrate: u32) -> Self {
         self.video_bitrate = bitrate;
+        self
+    }
+
+    /// Sets quality for CRF-based encoding (0-100, higher = better).
+    /// Recommended: 75-85 for screen recording.
+    /// Only supported on VideoToolbox (macOS) and x264; other encoders fall back to CBR.
+    pub fn with_crf(mut self, crf: u32) -> Self {
+        self.crf = Some(crf);
         self
     }
 
@@ -275,6 +289,7 @@ impl SimpleOutputBuilder {
                 path: path.into(),
                 format: OutputFormat::default(),
                 custom_muxer_settings: None,
+                crf: None,
                 name: name.into(),
             },
             context,
@@ -320,6 +335,14 @@ impl SimpleOutputBuilder {
     /// Sets the video encoder to a generic hardware encoder.
     pub fn hardware_encoder(mut self, codec: HardwareCodec, preset: HardwarePreset) -> Self {
         self.settings.video_encoder = VideoEncoder::Hardware { codec, preset };
+        self
+    }
+
+    /// Sets quality for CRF-based encoding (0-100, higher = better).
+    /// Recommended: 75-85 for screen recording.
+    /// Only supported on VideoToolbox (macOS) and x264; other encoders fall back to CBR.
+    pub fn crf(mut self, crf: u32) -> Self {
+        self.settings.crf = Some(crf);
         self
     }
 
@@ -479,14 +502,45 @@ impl SimpleOutputBuilder {
         }
     }
 
+    /// Check if the selected encoder supports CRF rate control (VideoToolbox or x264).
+    fn encoder_supports_crf(encoder: &ObsVideoEncoderType) -> bool {
+        match encoder {
+            ObsVideoEncoderType::OBS_X264 => true,
+            ObsVideoEncoderType::Other(id) => id.contains("videotoolbox"),
+            _ => false,
+        }
+    }
+
     fn configure_video_encoder(
         &self,
         settings: &mut ObsData,
         selected_encoder: &ObsVideoEncoderType,
     ) -> Result<(), ObsError> {
-        // Set rate control to CBR
-        settings.set_string("rate_control", "CBR")?;
-        settings.set_int("bitrate", self.settings.video_bitrate as i64)?;
+        if let Some(crf) = self.settings.crf {
+            if Self::encoder_supports_crf(selected_encoder) {
+                settings.set_string("rate_control", "CRF")?;
+                let is_videotoolbox = matches!(selected_encoder, ObsVideoEncoderType::Other(id) if id.contains("videotoolbox"));
+                if is_videotoolbox {
+                    settings.set_int("quality", crf as i64)?;
+                    log::info!("Video encoder: CRF mode, VideoToolbox quality={}", crf);
+                } else {
+                    let x264_crf = ((100u32.saturating_sub(crf)) * 51 / 100) as i64;
+                    settings.set_int("crf", x264_crf)?;
+                    log::info!("Video encoder: CRF mode, x264 crf={}", x264_crf);
+                }
+            } else {
+                // Encoder doesn't support CRF, fall back to CBR
+                log::warn!(
+                    "CRF not supported by {:?}, falling back to CBR at {} Kbps",
+                    selected_encoder, self.settings.video_bitrate
+                );
+                settings.set_string("rate_control", "CBR")?;
+                settings.set_int("bitrate", self.settings.video_bitrate as i64)?;
+            }
+        } else {
+            settings.set_string("rate_control", "CBR")?;
+            settings.set_int("bitrate", self.settings.video_bitrate as i64)?;
+        }
 
         // Set preset based on the requested encoder and actual selected encoder
         let preset = match &self.settings.video_encoder {
