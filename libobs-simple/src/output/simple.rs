@@ -169,8 +169,10 @@ pub struct OutputSettings {
     path: ObsPath,
     format: OutputFormat,
     custom_muxer_settings: Option<String>,
-    /// CRF (Constant Rate Factor) value for quality-based encoding.
+    /// Quality value for CRF-based encoding (0-100, higher = better quality).
     /// When set, supported encoders (VideoToolbox, x264) use CRF instead of CBR.
+    /// VideoToolbox: passed directly as "quality" (0-100).
+    /// x264: mapped to CRF scale (100 → CRF 0, 0 → CRF 51).
     /// Unsupported encoders fall back to CBR with `video_bitrate`.
     crf: Option<u32>,
 }
@@ -182,8 +184,8 @@ impl OutputSettings {
         self
     }
 
-    /// Sets CRF (Constant Rate Factor) for quality-based encoding.
-    /// Lower values = higher quality. Typical range: 18-28. Recommended: 20 for screen recording.
+    /// Sets quality for CRF-based encoding (0-100, higher = better).
+    /// Recommended: 75-85 for screen recording.
     /// Only supported on VideoToolbox (macOS) and x264; other encoders fall back to CBR.
     pub fn with_crf(mut self, crf: u32) -> Self {
         self.crf = Some(crf);
@@ -336,8 +338,8 @@ impl SimpleOutputBuilder {
         self
     }
 
-    /// Sets CRF (Constant Rate Factor) for quality-based encoding.
-    /// Lower values = higher quality. Typical range: 18-28. Recommended: 20 for screen recording.
+    /// Sets quality for CRF-based encoding (0-100, higher = better).
+    /// Recommended: 75-85 for screen recording.
     /// Only supported on VideoToolbox (macOS) and x264; other encoders fall back to CBR.
     pub fn crf(mut self, crf: u32) -> Self {
         self.settings.crf = Some(crf);
@@ -517,7 +519,15 @@ impl SimpleOutputBuilder {
         if let Some(crf) = self.settings.crf {
             if Self::encoder_supports_crf(selected_encoder) {
                 settings.set_string("rate_control", "CRF")?;
-                settings.set_int("crf", crf as i64)?;
+                let is_videotoolbox = matches!(selected_encoder, ObsVideoEncoderType::Other(id) if id.contains("videotoolbox"));
+                if is_videotoolbox {
+                    settings.set_int("quality", crf as i64)?;
+                    log::info!("Video encoder: CRF mode, VideoToolbox quality={}", crf);
+                } else {
+                    let x264_crf = ((100u32.saturating_sub(crf)) * 51 / 100) as i64;
+                    settings.set_int("crf", x264_crf)?;
+                    log::info!("Video encoder: CRF mode, x264 crf={}", x264_crf);
+                }
             } else {
                 // Encoder doesn't support CRF, fall back to CBR
                 log::warn!(
