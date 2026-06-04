@@ -455,12 +455,16 @@ impl SimpleOutputBuilder {
             HardwareCodec::H264 => vec![
                 // macOS VideoToolbox (preferred on Mac)
                 ObsVideoEncoderType::Other(VIDEOTOOLBOX_H264.to_string()),
-                // NVIDIA
+                // NVIDIA (Windows + Linux)
                 ObsVideoEncoderType::OBS_NVENC_H264_TEX,
-                // AMD
+                // AMD AMF (Windows)
                 ObsVideoEncoderType::H264_TEXTURE_AMF,
-                // Intel QuickSync
+                // Intel QuickSync (Windows; some Linux setups)
                 ObsVideoEncoderType::OBS_QSV11_V2,
+                // Linux VAAPI (Intel/AMD via Mesa) - texture/zero-copy preferred, then generic.
+                // Without these, Intel/AMD GPUs on Linux silently fall back to software x264.
+                ObsVideoEncoderType::FFMPEG_VAAPI_TEX,
+                ObsVideoEncoderType::FFMPEG_VAAPI,
                 // software fallbacks for vendor SDKs
                 ObsVideoEncoderType::OBS_NVENC_H264_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_SOFT_V2,
@@ -468,24 +472,30 @@ impl SimpleOutputBuilder {
             HardwareCodec::HEVC => vec![
                 // macOS VideoToolbox HEVC (preferred on Mac, requires macOS 10.13+)
                 ObsVideoEncoderType::Other(VIDEOTOOLBOX_HEVC.to_string()),
-                // NVIDIA
+                // NVIDIA (Windows + Linux)
                 ObsVideoEncoderType::OBS_NVENC_HEVC_TEX,
-                // AMD
+                // AMD AMF (Windows)
                 ObsVideoEncoderType::H265_TEXTURE_AMF,
-                // Intel QuickSync
+                // Intel QuickSync (Windows; some Linux setups)
                 ObsVideoEncoderType::OBS_QSV11_HEVC,
+                // Linux VAAPI (Intel/AMD via Mesa) - texture/zero-copy preferred, then generic
+                ObsVideoEncoderType::HEVC_FFMPEG_VAAPI_TEX,
+                ObsVideoEncoderType::HEVC_FFMPEG_VAAPI,
                 // software fallbacks
                 ObsVideoEncoderType::OBS_NVENC_HEVC_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_HEVC_SOFT,
             ],
             HardwareCodec::AV1 => vec![
                 // Note: macOS VideoToolbox does not support AV1 as of macOS 14
-                // NVIDIA
+                // NVIDIA (Windows + Linux)
                 ObsVideoEncoderType::OBS_NVENC_AV1_TEX,
-                // AMD
+                // AMD AMF (Windows)
                 ObsVideoEncoderType::AV1_TEXTURE_AMF,
-                // Intel QuickSync
+                // Intel QuickSync (Windows; some Linux setups)
                 ObsVideoEncoderType::OBS_QSV11_AV1,
+                // Linux VAAPI (Intel/AMD via Mesa) - texture/zero-copy preferred, then generic
+                ObsVideoEncoderType::AV1_FFMPEG_VAAPI_TEX,
+                ObsVideoEncoderType::AV1_FFMPEG_VAAPI,
                 // software fallbacks
                 ObsVideoEncoderType::OBS_NVENC_AV1_SOFT,
                 ObsVideoEncoderType::OBS_QSV11_AV1_SOFT,
