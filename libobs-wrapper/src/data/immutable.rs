@@ -3,7 +3,7 @@ use std::{ffi::CStr, sync::Arc};
 use libobs::obs_data_t;
 
 use crate::{
-    data::ObsDataGetters, impl_obs_drop, run_with_obs, runtime::ObsRuntime, unsafe_send::Sendable,
+    data::ObsDataGetters, run_with_obs, runtime::ObsRuntime, unsafe_send::Sendable,
     utils::ObsError,
 };
 
@@ -88,6 +88,9 @@ impl From<ObsData> for ImmutableObsData {
     }
 }
 
-impl_obs_drop!(ImmutableObsData, (ptr), move || unsafe {
-    libobs::obs_data_release(ptr)
-});
+// NOTE: intentionally NO per-instance `impl Drop` here. `ImmutableObsData` is `Clone`,
+// and the underlying `obs_data` is released exactly once by the shared
+// `Arc<_ObsDataDropGuard>` (the same pattern `ObsData` uses). A per-instance
+// `obs_data_release` would fire once per clone — an over-release/double-free that
+// corrupts the OBS data allocator and later aborts in `obs_data_destroy` (free():
+// invalid pointer), typically while creating a subsequent source.
