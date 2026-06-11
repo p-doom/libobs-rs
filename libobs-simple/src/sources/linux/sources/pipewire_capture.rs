@@ -46,6 +46,14 @@ pub struct PipeWireDesktopCaptureSourceBuilder {
     /// Whether to show cursor (for screen capture)
     #[obs_property(type_t = "bool", settings_key = "ShowCursor")]
     show_cursor: bool,
+
+    /// PipeWire node id to connect to directly. When greater than 0, the source connects to
+    /// this already-existing node (e.g. one produced by `org.gnome.Mutter.ScreenCast`'s
+    /// `RecordWindow`/`RecordMonitor`) and skips the xdg-desktop-portal handshake and picker
+    /// entirely. 0 (the default) preserves the normal portal flow. Requires the obs-pipewire
+    /// "connect to node" patch in the bundled OBS build; without it the value is ignored.
+    #[obs_property(type_t = "int", settings_key = "ConnectNode")]
+    connect_node: i64,
 }
 
 #[obs_object_updater("pipewire-desktop-capture-source", ObsSourceRef)]
@@ -64,6 +72,14 @@ pub struct PipeWireWindowCaptureSourceBuilder {
     /// Whether to show cursor (for screen capture)
     #[obs_property(type_t = "bool", settings_key = "ShowCursor")]
     show_cursor: bool,
+
+    /// PipeWire node id to connect to directly. When greater than 0, the source connects to
+    /// this already-existing node (e.g. one produced by `org.gnome.Mutter.ScreenCast`'s
+    /// `RecordWindow`/`RecordMonitor`) and skips the xdg-desktop-portal handshake and picker
+    /// entirely. 0 (the default) preserves the normal portal flow. Requires the obs-pipewire
+    /// "connect to node" patch in the bundled OBS build; without it the value is ignored.
+    #[obs_property(type_t = "int", settings_key = "ConnectNode")]
+    connect_node: i64,
 }
 
 #[obs_object_updater("pipewire-window-capture-source", ObsSourceRef)]
@@ -83,6 +99,14 @@ pub struct PipeWireScreenCaptureSourceBuilder {
     /// Whether to show cursor (for screen capture)
     #[obs_property(type_t = "bool", settings_key = "ShowCursor")]
     show_cursor: bool,
+
+    /// PipeWire node id to connect to directly. When greater than 0, the source connects to
+    /// this already-existing node (e.g. one produced by `org.gnome.Mutter.ScreenCast`'s
+    /// `RecordWindow`/`RecordMonitor`) and skips the xdg-desktop-portal handshake and picker
+    /// entirely. 0 (the default) preserves the normal portal flow. Requires the obs-pipewire
+    /// "connect to node" patch in the bundled OBS build; without it the value is ignored.
+    #[obs_property(type_t = "int", settings_key = "ConnectNode")]
+    connect_node: i64,
 }
 
 #[obs_object_updater("pipewire-screen-capture-source", ObsSourceRef)]
