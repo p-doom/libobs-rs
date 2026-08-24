@@ -11,7 +11,6 @@
 //! - Create and manage scenes
 //! - Create and manage outputs (recording, streaming)
 //! - Access and configure video/audio settings
-//! - Download and bootstrap OBS binaries at runtime
 //!
 //! # Thread Safety
 //!

@@ -28,23 +28,21 @@ On macOS, you need to install `simde` (SIMD Everywhere) for building the binding
 brew install simde
 ```
 
-### Option 1: Using libobs-bootstrapper (Recommended for macOS and distribution)
+### Native OBS runtime
 
-> [!NOTE]
-> The `libobs-bootstrapper` crate downloads and installs OBS binaries at runtime, which is especially useful for macOS (downloads official signed DMG files) and for distributing applications without requiring users to install OBS separately.
+OBS and every native dependency must be authenticated and packaged before the
+application process starts. Windows applications that import `obs.dll` load it
+before Rust `main`; macOS applications must include the framework, plugins,
+data, and helper binaries in the signed application bundle. Runtime download
+and replacement is disabled.
 
-See the [libobs-bootstrapper documentation](https://crates.io/crates/libobs-bootstrapper) for detailed usage instructions.
-
-### Option 2: Using cargo-obs-build (Windows/Linux development)
+Use `cargo-obs-build` for Windows/Linux development:
 
 Make sure that the OBS binaries are in your target directory. There's even a tool to help you build OBS from source! <br>
 Install the tool
 ```bash
 cargo install cargo-obs-build
 ```
-
-> [!NOTE]
-> There is now a standalone `libobs-bootstrapper` crate that can download and install OBS binaries at runtime, which is useful for distributing applications without requiring users to install OBS separately. See the [libobs-bootstrapper documentation](https://crates.io/crates/libobs-bootstrapper) for more details.
 
 Add the following to your `Cargo.toml`
 ```toml
@@ -90,4 +88,3 @@ or [libobs-wrapper](./libobs-wrapper/README.md).
 This project is **not affiliated with**, **endorsed by**, or **associated with** the OBS Project or OBS Studio.  
 **OBS** and **OBS Studio** are trademarks of their respective owners.  
 The developers of this project are independent and **not part of the OBS Studio team** in any capacity.
-

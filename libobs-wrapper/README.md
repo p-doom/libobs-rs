@@ -8,7 +8,6 @@ A safe, ergonomic Rust wrapper around the OBS (Open Broadcaster Software) Studio
 
 - **Thread Safety**: Uses a dedicated thread to communicate with OBS, allowing safe cross-thread usage
 - **Resource Safety**: RAII-based resource management for OBS objects
-- **Runtime Bootstrapping**: Optional automatic download and setup of OBS binaries at runtime (functionality moved to [libobs-bootstrapper](https://crates.io/crates/libobs-bootstrapper))
 - **Scene Management**: Create and manipulate scenes, sources, and outputs
 - **Video Recording**: Configure and record video with various encoders
 - **Audio Support**: Configure audio sources and encoders
@@ -57,20 +56,19 @@ cargo obs-build build --out-dir target/(debug|release)/deps
 
 More details can be found in the [cargo-obs-build documentation](../cargo-obs-build/README.md).
 
-### Option 2: Using the OBS Bootstrapper (Recommended for distribution)
+### Production distribution
 
-For applications that need to bundle OBS binaries or handle runtime installation, we recommend using the [libobs-bootstrapper](https://crates.io/crates/libobs-bootstrapper) crate.
-
-This separate crate provides functionality to download and install OBS binaries at runtime, which is particularly useful for distributing applications without requiring users to install OBS separately.
-
-See the [libobs-bootstrapper documentation](https://docs.rs/libobs-bootstrapper) for detailed setup instructions and examples of implementing custom progress handlers.
+Package and authenticate the complete OBS runtime before the application starts.
+Windows installers must provide the exact DLL, plugin, data, and helper closure;
+macOS application bundles must provide the exact framework, plugins, data, and
+helpers before signing and notarization. Runtime download and replacement is
+disabled because it cannot authorize native code before the loader executes it.
 
 ## Advanced Usage
 
 For more advanced usage examples, check out:
 
 - Monitor capture example with full configuration: [examples/monitor_capture](../examples/monitor-capture)
-- Runtime bootstrapping example: [examples/download-at-runtime](../examples/download-at-runtime)
 
 For even easier handling, consider using the [`libobs-simple`](https://crates.io/crates/libobs-simple) crate which
 builds on top of this wrapper.
@@ -87,7 +85,7 @@ builds on top of this wrapper.
 ### Missing DLLs or Crashes on Startup
 
 If you're experiencing crashes or missing DLL errors:
-1. Make sure OBS binaries are correctly installed using either cargo-obs-build or the bootstrapper
+1. Make sure the exact OBS runtime was authenticated and packaged before process startup
 2. Check that you're using the correct OBS version compatible with this wrapper
 3. Verify that all required DLLs are in your executable directory
 

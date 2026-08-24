@@ -1,36 +1,19 @@
-# Bootstrap Options
+# OBS Runtime Packaging
 
-`libobs-rs` offers two main ways to handle OBS binaries:
+Runtime OBS bootstrap is disabled. An in-process hash or receipt check cannot
+authorize a Windows `obs.dll` that the operating-system loader executes before
+Rust `main`.
 
-## 1. Runtime Bootstrapping (Recommended)
+For development, use [`cargo-obs-build`](../cargo-obs-build/README.md) to build
+the exact native runtime before starting the application.
 
-Using `libobs-bootstrapper` (integrated into `libobs-simple`), your application can download and install OBS binaries at runtime.
+Production distributions must package the complete reviewed runtime before
+process startup:
 
-### Pros:
-- Smaller application size (binaries downloaded on demand).
-- Automatic updates.
-- Easy distribution (just ship your exe).
+- Windows installers must contain the exact OBS libraries, plugins, data, and
+  helpers inside the signed installer and install them under protected ACLs.
+- macOS application bundles must contain the exact framework, plugins, data,
+  and helpers before the bundle is signed and notarized.
 
-### Cons:
-- Requires internet connection on first run.
-- Startup time is longer on first run.
-
-[Example here](../examples/download-at-runtime)
-
-## 2. Build-time Setup
-
-Using `cargo-obs-build`, you can download OBS binaries during development or build time and bundle them.
-
-### Pros:
-- No internet required at runtime.
-- Faster startup.
-
-### Cons:
-- Larger distribution size.
-- Manual update management.
-
-[Docs here](../cargo-obs-build/README.md)
-
-## How to choose?
-
-For most users, **Runtime Bootstrapping** is the easiest and best choice. If you are deploying to an offline environment or need instant startup, use **Build-time Setup**.
+Do not download, replace, or accept OBS native files from inside the application
+process.

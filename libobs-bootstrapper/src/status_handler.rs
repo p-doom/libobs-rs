@@ -1,17 +1,16 @@
 use std::{convert::Infallible, fmt::Debug};
 
-//NOTE: Maybe do not require to implement Debug here?
 pub trait ObsBootstrapStatusHandler: Debug + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Used to report in some way or another the download progress to the user (this is between 0.0 and 1.0)
-    /// # Errors
-    /// This should return an error if the download process should be aborted. This error will be mapped to `ObsBootstrapError::Abort`. This WILL NOT clean up any files or similar, that is the responsibility of the caller.
+    /// Legacy download callback retained for source compatibility.
+    ///
+    /// Disabled bootstrap entry points never invoke this method.
     fn handle_downloading(&mut self, progress: f32, message: String) -> Result<(), Self::Error>;
 
-    /// Used to report in some way another the extraction progress to the user (this is between 0.0 and 1.0)
-    /// # Errors
-    /// This should return an error if the extraction process should be aborted. This error will be mapped to `ObsBootstrapError::Abort`. This WILL NOT clean up any files or similar, that
+    /// Legacy extraction callback retained for source compatibility.
+    ///
+    /// Disabled bootstrap entry points never invoke this method.
     fn handle_extraction(&mut self, progress: f32, message: String) -> Result<(), Self::Error>;
 }
 

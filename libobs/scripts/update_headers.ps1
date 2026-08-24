@@ -93,20 +93,6 @@ finally
 }
 
 Copy-Item $tempDir/build_x64/libobs/RelWithDebInfo/obs.lib $PSScriptRoot/../
-git clone "https://github.com/sshcrack/dummy-dll-generator" --depth 1 $tempDir/dummy-dll
-
-Push-Location $PSScriptRoot/../../libobs-bootstrapper/assets/
-try
-{
-    . $tempDir/dummy-dll/dummyDLL.exe $tempDir/build_x64/libobs/RelWithDebInfo/obs.dll
-    Move-Item out.dll obs-dummy.dll -Force
-    Remove-Item out.exp -Force
-    Remove-Item out.lib -Force
-}
-finally
-{
-    Pop-Location
-}
 
 
 

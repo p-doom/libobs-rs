@@ -1,18 +1,22 @@
 use std::{
     collections::HashSet,
-    fs::{File, OpenOptions},
-    io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
 };
 
 use libobs::{LIBOBS_API_MAJOR_VER, LIBOBS_API_MINOR_VER, LIBOBS_API_PATCH_VER};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::ObsBootstrapError;
 
 const MANIFEST_SCHEMA: &str = "libobs-bootstrap-manifest-v1";
-pub(crate) const RECEIPT_NAME: &str = ".libobs-bootstrap-receipt-v1.json";
+const MAX_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+const MAX_BUNDLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_FILE_COUNT: usize = 65_536;
+const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_PATH_BYTES: usize = 1024;
+const MAX_PATH_COMPONENTS: usize = 32;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,23 +118,9 @@ pub struct ObsBundleManifest {
     arch: String,
     obs_abi: String,
     implementation_id: String,
-    files: Vec<FileDocument>,
-    url: reqwest::Url,
+    url: url::Url,
     sha256: [u8; 32],
     size: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct InstallReceipt {
-    schema: String,
-    manifest_identity: String,
-    platform: String,
-    arch: String,
-    obs_abi: String,
-    implementation_id: String,
-    bundle_sha256: String,
-    bundle_size: u64,
 }
 
 impl ObsBundleManifest {
@@ -149,6 +139,9 @@ impl ObsBundleManifest {
         target_platform: &str,
         target_arch: &str,
     ) -> Result<Self, ObsBootstrapError> {
+        if bytes.is_empty() || bytes.len() > MAX_MANIFEST_BYTES {
+            return Err(invalid("bundle manifest is outside its byte limit"));
+        }
         let expected_identity = decode_sha256("manifest", expected_identity)?;
         let actual_identity: [u8; 32] = Sha256::digest(bytes).into();
         if actual_identity != expected_identity {
@@ -198,9 +191,42 @@ impl ObsBundleManifest {
         validate_identifier("implementation ID", &document.implementation_id)?;
         validate_provenance(&document.provenance)?;
         validate_files("bundle files", &document.files)?;
+        if document.platform == "windows" {
+            validate_windows_file_paths(&document.files)?;
+        }
+        let required_runtime = match document.platform.as_str() {
+            "windows" => "obs.dll",
+            "macos" => "libobs.framework/Versions/A/libobs",
+            _ => unreachable!("platform validated above"),
+        };
+        if !document
+            .files
+            .iter()
+            .any(|file| file.path == required_runtime)
+        {
+            return Err(invalid(format!(
+                "bundle files do not contain the required runtime: {required_runtime}"
+            )));
+        }
+        if document.files.len() > MAX_FILE_COUNT {
+            return Err(invalid("bundle file count exceeds its limit"));
+        }
+        let mut total_size = 0_u64;
+        for file in &document.files {
+            if file.size > MAX_FILE_BYTES {
+                return Err(invalid(format!(
+                    "bundle file exceeds its byte limit: {}",
+                    file.path
+                )));
+            }
+            total_size = total_size
+                .checked_add(file.size)
+                .filter(|size| *size <= MAX_TOTAL_FILE_BYTES)
+                .ok_or_else(|| invalid("bundle files exceed their total byte limit"))?;
+        }
 
-        if document.bundle.size == 0 {
-            return Err(invalid("bundle size must be non-zero"));
+        if document.bundle.size == 0 || document.bundle.size > MAX_BUNDLE_BYTES {
+            return Err(invalid("bundle size is outside its byte limit"));
         }
         let sha256 = decode_sha256("bundle", &document.bundle.sha256)?;
         let url = validate_https_url("bundle", &document.bundle.url)?;
@@ -211,7 +237,6 @@ impl ObsBundleManifest {
             arch: document.arch,
             obs_abi: document.obs_abi,
             implementation_id: document.implementation_id,
-            files: document.files,
             url,
             sha256,
             size: document.bundle.size,
@@ -238,7 +263,7 @@ impl ObsBundleManifest {
         &self.implementation_id
     }
 
-    pub fn url(&self) -> &reqwest::Url {
+    pub fn url(&self) -> &url::Url {
         &self.url
     }
 
@@ -248,88 +273,6 @@ impl ObsBundleManifest {
 
     pub fn size(&self) -> u64 {
         self.size
-    }
-
-    pub(crate) fn archive_extension(&self) -> &'static str {
-        match self.platform.as_str() {
-            "windows" => "7z",
-            "macos" => "dmg",
-            _ => unreachable!("platform validated by from_document"),
-        }
-    }
-
-    pub(crate) fn verify_staged_files(&self, directory: &Path) -> Result<(), ObsBootstrapError> {
-        for expected in &self.files {
-            let path = directory.join(&expected.path);
-            let metadata = std::fs::symlink_metadata(&path)
-                .map_err(|error| ObsBootstrapError::IoError("Reading staged bundle file", error))?;
-            if !metadata.file_type().is_file() || metadata.len() != expected.size {
-                return Err(invalid(format!(
-                    "staged file identity mismatch: {}",
-                    expected.path
-                )));
-            }
-
-            let mut file = File::open(&path)
-                .map_err(|error| ObsBootstrapError::IoError("Opening staged bundle file", error))?;
-            let mut hasher = Sha256::new();
-            let mut buffer = [0_u8; 64 * 1024];
-            loop {
-                let read = file.read(&mut buffer).map_err(|error| {
-                    ObsBootstrapError::IoError("Hashing staged bundle file", error)
-                })?;
-                if read == 0 {
-                    break;
-                }
-                hasher.update(&buffer[..read]);
-            }
-            if hex::encode(hasher.finalize()) != expected.sha256 {
-                return Err(ObsBootstrapError::HashMismatchError);
-            }
-        }
-        Ok(())
-    }
-
-    fn receipt(&self) -> InstallReceipt {
-        InstallReceipt {
-            schema: MANIFEST_SCHEMA.to_string(),
-            manifest_identity: self.identity.clone(),
-            platform: self.platform.clone(),
-            arch: self.arch.clone(),
-            obs_abi: self.obs_abi.clone(),
-            implementation_id: self.implementation_id.clone(),
-            bundle_sha256: hex::encode(self.sha256),
-            bundle_size: self.size,
-        }
-    }
-
-    pub(crate) fn write_receipt(&self, directory: &Path) -> Result<(), ObsBootstrapError> {
-        let receipt_path = directory.join(RECEIPT_NAME);
-        if receipt_path.exists() {
-            return Err(invalid("bundle must not contain an install receipt"));
-        }
-        let bytes = serde_json::to_vec(&self.receipt())
-            .map_err(|error| invalid(format!("failed to serialize install receipt: {error}")))?;
-        let temporary_path = directory.join(format!("{RECEIPT_NAME}.tmp"));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-            .map_err(|error| ObsBootstrapError::IoError("Creating install receipt", error))?;
-        file.write_all(&bytes)
-            .map_err(|error| ObsBootstrapError::IoError("Writing install receipt", error))?;
-        file.sync_all()
-            .map_err(|error| ObsBootstrapError::IoError("Syncing install receipt", error))?;
-        std::fs::rename(temporary_path, receipt_path)
-            .map_err(|error| ObsBootstrapError::IoError("Publishing install receipt", error))
-    }
-
-    pub(crate) fn receipt_matches(&self, directory: &Path) -> bool {
-        let Ok(bytes) = std::fs::read(directory.join(RECEIPT_NAME)) else {
-            return false;
-        };
-        serde_json::from_slice::<InstallReceipt>(&bytes)
-            .is_ok_and(|receipt| receipt == self.receipt())
     }
 }
 
@@ -420,15 +363,64 @@ fn validate_files(label: &str, files: &[FileDocument]) -> Result<(), ObsBootstra
 
 fn validate_file(label: &str, file: &FileDocument) -> Result<(), ObsBootstrapError> {
     let path = Path::new(&file.path);
-    if file.path.is_empty()
+    if file.size == 0
+        || file.path.is_empty()
+        || file.path.len() > MAX_PATH_BYTES
         || file.path.contains('\\')
+        || file.path.split('/').any(str::is_empty)
+        || path.components().count() > MAX_PATH_COMPONENTS
         || path
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err(invalid(format!("invalid {label} path: {}", file.path)));
+        return Err(invalid(format!("invalid {label}: {}", file.path)));
     }
     decode_sha256(label, &file.sha256)?;
+    Ok(())
+}
+
+fn validate_windows_file_paths(files: &[FileDocument]) -> Result<(), ObsBootstrapError> {
+    let mut folded_paths = HashSet::with_capacity(files.len());
+    for file in files {
+        let mut folded = String::with_capacity(file.path.len());
+        for component in file.path.split('/') {
+            if component.ends_with([' ', '.'])
+                || !component.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b' ' | b'.' | b'_' | b'(' | b')' | b'+' | b'-')
+                })
+            {
+                return Err(invalid(format!(
+                    "invalid Windows bundle file path: {}",
+                    file.path
+                )));
+            }
+            let stem = component
+                .split_once('.')
+                .map_or(component, |(stem, _)| stem)
+                .to_ascii_lowercase();
+            if matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+                || (stem.len() == 4
+                    && matches!(&stem[..3], "com" | "lpt")
+                    && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+            {
+                return Err(invalid(format!(
+                    "reserved Windows bundle file path: {}",
+                    file.path
+                )));
+            }
+            if !folded.is_empty() {
+                folded.push('/');
+            }
+            folded.push_str(&component.to_ascii_lowercase());
+        }
+        if !folded_paths.insert(folded) {
+            return Err(invalid(format!(
+                "case-colliding Windows bundle file path: {}",
+                file.path
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -468,17 +460,18 @@ fn decode_sha256(label: &str, value: &str) -> Result<[u8; 32], ObsBootstrapError
     Ok(bytes.try_into().expect("length checked above"))
 }
 
-fn validate_https_url(label: &str, value: &str) -> Result<reqwest::Url, ObsBootstrapError> {
-    let url = reqwest::Url::parse(value)
-        .map_err(|error| invalid(format!("invalid {label} URL: {error}")))?;
+fn validate_https_url(label: &str, value: &str) -> Result<url::Url, ObsBootstrapError> {
+    let url =
+        url::Url::parse(value).map_err(|error| invalid(format!("invalid {label} URL: {error}")))?;
     if url.scheme() != "https"
         || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
+        || url.query().is_some()
         || url.fragment().is_some()
     {
         return Err(invalid(format!(
-            "{label} URL must be HTTPS without credentials or a fragment"
+            "{label} URL must be HTTPS without credentials, a query, or a fragment"
         )));
     }
     Ok(url)
@@ -491,35 +484,15 @@ fn invalid(message: impl Into<String>) -> ObsBootstrapError {
 #[derive(Debug, Clone)]
 pub struct ObsBootstrapperOptions {
     pub(crate) manifest: ObsBundleManifest,
-    pub(crate) restart_after_update: bool,
-    pub(crate) install_dir: Option<PathBuf>,
 }
 
 impl ObsBootstrapperOptions {
     pub fn new(manifest: ObsBundleManifest) -> Self {
-        Self {
-            manifest,
-            restart_after_update: true,
-            install_dir: None,
-        }
+        Self { manifest }
     }
 
     pub fn manifest(&self) -> &ObsBundleManifest {
         &self.manifest
-    }
-
-    pub fn set_install_dir<P: Into<PathBuf>>(mut self, install_dir: P) -> Self {
-        self.install_dir = Some(install_dir.into());
-        self
-    }
-
-    pub fn get_install_dir(&self) -> Option<&PathBuf> {
-        self.install_dir.as_ref()
-    }
-
-    pub fn set_no_restart(mut self) -> Self {
-        self.restart_after_update = false;
-        self
     }
 }
 
@@ -588,17 +561,115 @@ mod tests {
     }
 
     #[test]
-    fn staged_files_and_receipt_bind_the_entire_manifest() {
+    fn manifest_rejects_leakage_aliases_and_unbounded_resources() {
+        let original = manifest("windows", "x86_64", "32.0.2", SHA);
+        let mut document: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        document["bundle"]["url"] = serde_json::Value::String(
+            "https://example.invalid/obs.7z?credential=secret".to_string(),
+        );
+        assert!(parse(&serde_json::to_vec(&document).unwrap(), "windows", "x86_64").is_err());
+
+        for path in [
+            "obs.dll:stream",
+            "con.dll",
+            "folder./obs.dll",
+            "data//obs.dll",
+            "dáta/obs.dll",
+        ] {
+            let mut document: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            document["files"][0]["path"] = serde_json::Value::String(path.to_string());
+            assert!(parse(&serde_json::to_vec(&document).unwrap(), "windows", "x86_64").is_err());
+        }
+
+        let mut document: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        document["bundle"]["size"] = serde_json::Value::from(MAX_BUNDLE_BYTES + 1);
+        assert!(parse(&serde_json::to_vec(&document).unwrap(), "windows", "x86_64").is_err());
+
+        for size in [0, MAX_FILE_BYTES + 1] {
+            let mut document: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            document["files"][0]["size"] = serde_json::Value::from(size);
+            if size == 0 {
+                document["files"][0]["sha256"] =
+                    serde_json::Value::String(hex::encode(Sha256::digest([])));
+            }
+            assert!(parse(&serde_json::to_vec(&document).unwrap(), "windows", "x86_64").is_err());
+        }
+
+        let mut oversized = original;
+        oversized.resize(MAX_MANIFEST_BYTES + 1, b' ');
+        let identity = hex::encode(Sha256::digest(&oversized));
+        assert!(
+            ObsBundleManifest::from_json_for_target(&oversized, &identity, "windows", "x86_64")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn every_runtime_entry_point_fails_before_consumer_state_is_read() {
+        use std::{
+            convert::Infallible,
+            future::Future,
+            sync::Arc,
+            task::{Context, Poll, Wake, Waker},
+        };
+
+        #[derive(Debug)]
+        struct PanicHandler;
+
+        impl crate::status_handler::ObsBootstrapStatusHandler for PanicHandler {
+            type Error = Infallible;
+
+            fn handle_downloading(
+                &mut self,
+                _progress: f32,
+                _message: String,
+            ) -> Result<(), Self::Error> {
+                panic!("disabled bootstrap called its status handler")
+            }
+
+            fn handle_extraction(
+                &mut self,
+                _progress: f32,
+                _message: String,
+            ) -> Result<(), Self::Error> {
+                panic!("disabled bootstrap called its status handler")
+            }
+        }
+
+        struct NoopWake;
+
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+
+        fn ready<F: Future>(future: F) -> F::Output {
+            let waker = Waker::from(Arc::new(NoopWake));
+            let mut context = Context::from_waker(&waker);
+            let mut future = std::pin::pin!(future);
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(output) => output,
+                Poll::Pending => panic!("disabled bootstrap performed asynchronous work"),
+            }
+        }
+
         let bytes = manifest("windows", "x86_64", "32.0.2", SHA);
         let parsed = parse(&bytes, "windows", "x86_64").unwrap();
-        let directory = std::env::temp_dir().join(format!(
-            "libobs-bootstrap-receipt-test-{}",
-            uuid::Uuid::new_v4()
+        let options = ObsBootstrapperOptions::new(parsed);
+
+        assert!(matches!(
+            crate::ObsBootstrapper::is_valid_installation_with_options(&options),
+            Err(ObsBootstrapError::RuntimeBootstrapDisabled)
         ));
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(directory.join("obs.dll"), b"obs").unwrap();
-        parsed.verify_staged_files(&directory).unwrap();
-        parsed.write_receipt(&directory).unwrap();
-        assert!(parsed.receipt_matches(&directory));
+        assert!(matches!(
+            ready(crate::ObsBootstrapper::bootstrap(&options)),
+            Err(ObsBootstrapError::RuntimeBootstrapDisabled)
+        ));
+        assert!(matches!(
+            ready(crate::ObsBootstrapper::bootstrap_with_handler(
+                &options,
+                Box::new(PanicHandler)
+            )),
+            Err(ObsBootstrapError::RuntimeBootstrapDisabled)
+        ));
     }
 }
