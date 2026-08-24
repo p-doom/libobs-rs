@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use libloading::Library;
-use libobs::{LIBOBS_API_MAJOR_VER, LIBOBS_API_MINOR_VER, LIBOBS_API_PATCH_VER};
-
 use crate::error::ObsBootstrapError;
+use libloading::Library;
 
 pub type GetVersionFunc = unsafe extern "C" fn() -> u32;
 
@@ -43,25 +41,4 @@ pub fn get_installed_version(obs_dll: &Path) -> Result<Option<String>, ObsBootst
 
         Ok(Some(version_str))
     }
-}
-
-pub fn should_update(version_str: &str) -> Result<bool, ObsBootstrapError> {
-    let version = version_str.split('.').collect::<Vec<_>>();
-    if version.len() != 3 {
-        return Err(ObsBootstrapError::VersionError(format!(
-            "Invalid version string: {}",
-            version_str
-        )));
-    }
-
-    let parse_error =
-        || ObsBootstrapError::VersionError(format!("Invalid version string: {}", version_str));
-
-    let major = version[0].parse::<u64>().map_err(|_| parse_error())?;
-    let minor = version[1].parse::<u64>().map_err(|_| parse_error())?;
-    let patch = version[2].parse::<u64>().map_err(|_| parse_error())?;
-
-    Ok(major != LIBOBS_API_MAJOR_VER as u64
-        || minor != LIBOBS_API_MINOR_VER as u64
-        || patch < LIBOBS_API_PATCH_VER as u64)
 }

@@ -9,10 +9,10 @@ Note: This crate currently supports Windows and MacOS platforms. Refer to the li
 
 ## Features
 
-- **Automatic OBS Download**: Downloads appropriate OBS binaries at runtime
+- **Exact OBS Download**: Downloads the single bundle named by a caller-supplied manifest
 - **Cross-Platform**: Supports Windows (7z), macOS (DMG)
 - **Progress Tracking**: Built-in progress reporting for downloads and extraction
-- **Version Management**: Handles OBS version checking and updates
+- **Provenance Enforcement**: Requires an application-anchored manifest identity and verifies the archive and staged runtime files
 - **Custom Status Handlers**: Flexible progress reporting via custom handlers
 - **Async Support**: Built on Tokio for async operations
 - **Error Handling**: Comprehensive error types for reliable error handling
@@ -32,14 +32,16 @@ Here's a simple example using the default console handler:
 
 ```rust
 use libobs_bootstrapper::{
-    ObsBootstrapper, ObsBootstrapperOptions, ObsBootstrapperResult
+    ObsBootstrapper, ObsBootstrapperOptions, ObsBootstrapperResult, ObsBundleManifest
 };
 use libobs_wrapper::{context::ObsContext, utils::StartupInfo};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Configure bootstrapper options
-    let options = ObsBootstrapperOptions::default();
+    const MANIFEST: &[u8] = include_bytes!("../obs-bundle-manifest.json");
+    const MANIFEST_SHA256: &str = env!("LIBOBS_BUNDLE_MANIFEST_SHA256");
+    let manifest = ObsBundleManifest::from_json(MANIFEST, MANIFEST_SHA256)?;
+    let options = ObsBootstrapperOptions::new(manifest);
     
     // Run bootstrap with default console handler
     match ObsBootstrapper::bootstrap(&options).await? {
@@ -49,7 +51,6 @@ async fn main() -> anyhow::Result<()> {
         ObsBootstrapperResult::Restart => {
             // This only happens on Windows - macOS moves files immediately
             println!("OBS has been updated. Restarting application...");
-            ObsBootstrapper::spawn_updater(options).await?;
             std::process::exit(0);
         }
     }
@@ -107,15 +108,15 @@ impl ObsBootstrapStatusHandler for CustomProgressHandler {
 
 ### Setup Steps
 
-1. **Windows only:** Add a placeholder DLL<br>
-   You can either: <br>
-   **a) RECOMMENDED** enable the `install_dummy_dll` feature for this crate <br>
-   **b)** Add a placeholder `obs.dll` file to your executable directory:
-     - Download a dummy DLL from [libobs-builds releases](https://github.com/sshcrack/libobs-builds/releases)
-     - Use the version matching your target OBS version
-     - Rename the downloaded file to `obs.dll`
+1. **Windows only:** Keep the default `install_dummy_dll` feature enabled. It places
+   the crate's vendored placeholder in the build output; the verified bundle replaces it.
 
-2. Call `ObsBootstrapper::bootstrap()` at application startup
+2. Embed exactly one `libobs-bootstrap-manifest-v1` document and its independently
+   recorded SHA-256, then call `ObsBootstrapper::bootstrap()` before loading OBS. The
+   strict document binds `platform`, `arch`, `obs_abi`, `implementation_id`, the exact
+   OBS and libobs-rs commits and trees, generated bindings, build recipe, immutable
+   builder image, dependency source materials, shipped file identities, and one bundle
+   `url`/`size`/`sha256`. Unknown fields and non-canonical identities are rejected.
 
 3. Handle the result based on platform:
    - **Windows**: If `ObsBootstrapperResult::Restart` is returned, exit the application and the updater will restart it automatically
@@ -123,31 +124,21 @@ impl ObsBootstrapStatusHandler for CustomProgressHandler {
 
 ### Platform-Specific Notes
 
-- **Windows**: Downloads and extracts 7z archives from custom builds
+- **Windows**: Downloads and extracts the manifest's verified 7z archive
   - Requires application restart to complete installation
   - An updater script moves files from `obs_new/` to the executable directory after restart
-- **macOS**: Downloads official OBS DMG files and extracts frameworks, plugins, and data
+- **macOS**: Downloads and verifies the manifest's exact DMG before extracting frameworks, plugins, and data
   - **No restart required** - files are moved immediately after extraction
-  - Automatic code signature handling (DMG files come pre-signed by OBS)
   - Dylibs can be replaced while the application is running
 
 ### Advanced Options
 
-The `ObsBootstrapperOptions` struct allows you to customize the bootstrapper:
+The manifest is required. The only path option is an explicit install root:
 
 ```rust
-let options = ObsBootstrapperOptions::default()
-    .set_repository("sshcrack/libobs-builds")   // Custom repo
-    .set_update(true)                           // Check/download updates
+let manifest = ObsBundleManifest::from_json(&manifest_bytes, expected_manifest_sha256)?;
+let options = ObsBootstrapperOptions::new(manifest)
     .set_install_dir("/tmp/my-obs-runtime");    // Custom install root
-```
-
-To disable automatic OBS updates but still install when missing:
-
-```rust
-let options = ObsBootstrapperOptions::default()
-    .set_install_dir("/Users/me/Library/Application Support/dev.crowd-cast.agent/obs/current")
-    .set_update(false);
 ```
 
 ## Error Handling

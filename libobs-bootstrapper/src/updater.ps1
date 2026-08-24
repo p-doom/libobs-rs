@@ -24,13 +24,26 @@ catch {
 
 $binaryDirectory = [System.IO.Path]::GetDirectoryName($binary)
 $obsNewDir = Join-Path -Path $binaryDirectory -ChildPath "obs_new"
+$receiptName = ".libobs-bootstrap-receipt-v1.json"
+$stagedReceipt = Join-Path -Path $obsNewDir -ChildPath $receiptName
+$installedReceipt = Join-Path -Path $binaryDirectory -ChildPath $receiptName
 
 if (Test-Path $obsNewDir -PathType Container) {
+    if (-Not (Test-Path $stagedReceipt -PathType Leaf)) {
+        Write-Host "Staged install receipt is missing"
+        exit 1
+    }
+    if (Test-Path $installedReceipt) {
+        Remove-Item -Path $installedReceipt -Force
+    }
     Write-Host "Found obs_new directory, copying all contents to binary directory"
 
     try {
         $files = Get-ChildItem -Path $obsNewDir -Recurse
         foreach ($file in $files) {
+            if ($file.FullName -eq $stagedReceipt) {
+                continue
+            }
             $relativePath = $file.FullName.Substring($obsNewDir.Length + 1)
             $destination = Join-Path -Path $binaryDirectory -ChildPath $relativePath
 
@@ -62,6 +75,13 @@ if (Test-Path $obsNewDir -PathType Container) {
                 exit 1
             }
         }
+
+        $temporaryReceipt = "${installedReceipt}.tmp"
+        if (Test-Path $temporaryReceipt) {
+            Remove-Item -Path $temporaryReceipt -Force
+        }
+        Copy-Item -Path $stagedReceipt -Destination $temporaryReceipt
+        Move-Item -Path $temporaryReceipt -Destination $installedReceipt
         Write-Host "Successfully copied all contents from obs_new to binary directory"
 
         # Optionally remove the obs_new directory after successful copy
@@ -79,7 +99,8 @@ if (Test-Path $obsNewDir -PathType Container) {
     }
 }
 else {
-    Write-Host "Warning: obs_new directory not found in $binaryDirectory"
+    Write-Host "obs_new directory not found in $binaryDirectory"
+    exit 1
 }
 
 if (-not $restart) {
@@ -108,7 +129,8 @@ if ($argumentHex -ne "") {
         }
     }
     catch {
-        Write-Host "Failed to decode argumentHex: $_. Starting without arguments."
+        Write-Host "Failed to decode argumentHex: $_"
+        exit 1
     }
 }
 

@@ -1,10 +1,12 @@
 // Test actual recording with bootstrapper-downloaded binaries
-use libobs_bootstrapper::{ObsBootstrapper, ObsBootstrapperOptions};
+use libobs_bootstrapper::ObsBootstrapper;
 use libobs_wrapper::{
     context::ObsContext,
     encoders::{ObsAudioEncoderType, ObsVideoEncoderBuilder},
     utils::{AudioEncoderInfo, OutputInfo, StartupInfo},
 };
+
+mod manifest;
 
 #[cfg(target_os = "windows")]
 use libobs_simple::sources::windows::MonitorCaptureSourceBuilder;
@@ -18,7 +20,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Step 1: Bootstrap OBS binaries
     println!("Bootstrapping OBS...");
-    match ObsBootstrapper::bootstrap(&ObsBootstrapperOptions::default()).await? {
+    let options = manifest::options()?;
+    match ObsBootstrapper::bootstrap(&options).await? {
         libobs_bootstrapper::ObsBootstrapperResult::None => {
             println!("✓ OBS ready\n");
         }

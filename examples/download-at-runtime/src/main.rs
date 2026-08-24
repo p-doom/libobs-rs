@@ -2,10 +2,11 @@ use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use libobs_bootstrapper::{
-    ObsBootstrapper, ObsBootstrapperOptions, ObsBootstrapperResult,
-    status_handler::ObsBootstrapStatusHandler,
+    ObsBootstrapper, ObsBootstrapperResult, status_handler::ObsBootstrapStatusHandler,
 };
 use libobs_wrapper::{context::ObsContext, utils::StartupInfo};
+
+mod manifest;
 
 #[derive(Debug, Clone)]
 struct ObsBootstrapProgress(Arc<ProgressBar>);
@@ -52,12 +53,10 @@ async fn main() {
     println!("Starting OBS bootstrapper...");
     let handler = ObsBootstrapProgress::new();
 
-    let res = ObsBootstrapper::bootstrap_with_handler(
-        &ObsBootstrapperOptions::default(),
-        Box::new(handler.clone()),
-    )
-    .await
-    .unwrap();
+    let options = manifest::options().unwrap();
+    let res = ObsBootstrapper::bootstrap_with_handler(&options, Box::new(handler.clone()))
+        .await
+        .unwrap();
     if matches!(res, ObsBootstrapperResult::Restart) {
         println!("OBS has been downloaded and extracted. The application will now restart.");
         return;

@@ -47,11 +47,14 @@ pub(crate) async fn extract_obs(
         let (tx, mut rx) = tokio::sync::mpsc::channel(5);
 
         let total = sz.archive().files.len() as f32;
-        if dest.exists() {
-            if let Err(err) = std::fs::remove_dir_all(&dest) {
-                yield Err(ObsBootstrapError::IoError("Failed to clear previous destination directory", err));
-                return;
-            }
+        if total == 0.0 {
+            yield Err(ObsBootstrapError::ExtractError("OBS archive is empty".to_string()));
+            return;
+        }
+        if dest.exists()
+            && let Err(err) = std::fs::remove_dir_all(&dest) {
+            yield Err(ObsBootstrapError::IoError("Failed to clear previous destination directory", err));
+            return;
         }
 
         if !dest.exists() && let Err(err) = std::fs::create_dir_all(&dest) {
@@ -63,9 +66,22 @@ pub(crate) async fn extract_obs(
         let mut r = task::spawn_blocking(move || {
             sz.for_each_entries(|entry, reader| {
                 curr += 1;
-                tx.blocking_send((curr as f32 / total, format!("Extracting {}", entry.name()))).unwrap();
+                tx.blocking_send((curr as f32 / total, format!("Extracting {}", entry.name())))
+                    .map_err(|_| sevenz_rust::Error::other("extraction status receiver closed"))?;
 
-                let dest_path = dest.join(entry.name());
+                let entry_path = Path::new(entry.name());
+                if entry_path.as_os_str().is_empty()
+                    || entry.name().contains('\\')
+                    || entry_path
+                        .components()
+                        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                {
+                    return Err(sevenz_rust::Error::other(format!(
+                        "unsafe archive entry path: {}",
+                        entry.name()
+                    )));
+                }
+                let dest_path = dest.join(entry_path);
 
                 default_entry_extract_fn(entry, reader, &dest_path)
             }).map_err(|e| ObsBootstrapError::ExtractError(e.to_string()))?;

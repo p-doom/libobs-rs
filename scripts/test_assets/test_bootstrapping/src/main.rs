@@ -1,10 +1,18 @@
 use std::{ffi::CString, ptr};
 
-use libobs_bootstrapper::{ObsBootstrapper, ObsBootstrapperOptions, ObsBootstrapperResult};
+use libobs_bootstrapper::{
+    ObsBootstrapper, ObsBootstrapperOptions, ObsBootstrapperResult, ObsBundleManifest,
+};
 
 #[tokio::main]
 async fn main() {
-    let res = ObsBootstrapper::bootstrap(&ObsBootstrapperOptions::default().set_no_restart())
+    let path = std::env::var_os("LIBOBS_BUNDLE_MANIFEST")
+        .expect("LIBOBS_BUNDLE_MANIFEST is required");
+    let identity = std::env::var("LIBOBS_BUNDLE_MANIFEST_SHA256")
+        .expect("LIBOBS_BUNDLE_MANIFEST_SHA256 is required");
+    let manifest = ObsBundleManifest::from_json(&std::fs::read(path).unwrap(), &identity).unwrap();
+    let options = ObsBootstrapperOptions::new(manifest).set_no_restart();
+    let res = ObsBootstrapper::bootstrap(&options)
         .await
         .unwrap();
 
